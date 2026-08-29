@@ -105,3 +105,36 @@ jobs:
           path: artifacts_${{ steps.timestamp.outputs.date }}.7z
           if-no-files-found: warn
           retention-days: 3
+
+  notify-discord:
+    name: Notify Discord
+    if: always()
+    needs: [workflow-keepalive, renew]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Send workflow result to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          RENEW_RESULT: ${{ needs.renew.result }}
+        run: |
+          case "$RENEW_RESULT" in
+            success) ICON="✅" ;;
+            failure) ICON="❌" ;;
+            cancelled) ICON="⚪" ;;
+            *) ICON="⚠️" ;;
+          esac
+
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          MESSAGE=$(printf '%s **%s**: `%s`\nRepository: `%s`\nTriggered by: `%s` (`%s`)\n[View workflow run](%s)' \
+            "$ICON" "$WORKFLOW_NAME" "$RENEW_RESULT" "$GITHUB_REPOSITORY" \
+            "$GITHUB_ACTOR" "$GITHUB_EVENT_NAME" "$RUN_URL")
+          PAYLOAD=$(jq -n --arg username "GitHub Actions" --arg content "$MESSAGE" \
+            '{username: $username, content: $content}')
+
+          curl --silent --show-error --fail-with-body --retry 3 --retry-all-errors \
+            -H "Content-Type: application/json" \
+            --data "$PAYLOAD" \
+            "$DISCORD_WEBHOOK_URL"
